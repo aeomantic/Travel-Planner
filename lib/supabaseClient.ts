@@ -69,8 +69,23 @@ export type TripSupabaseClient = SupabaseClient<Database>;
 /*  Client initialisation                                                      */
 /* -------------------------------------------------------------------------- */
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+/**
+ * supabase-js appends `/rest/v1/` itself, so a URL copied from the API settings
+ * (`https://<ref>.supabase.co/rest/v1/`) would request `/rest/v1/rest/v1/…` and the
+ * gateway rejects it with "Invalid path specified in request URL". Keep only the origin.
+ */
+function normalizeSupabaseUrl(raw: string | undefined): string | undefined {
+  const value = raw?.trim();
+  if (!value) return undefined;
+  try {
+    return new URL(value).origin;
+  } catch {
+    return value;
+  }
+}
+
+const SUPABASE_URL = normalizeSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL);
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || undefined;
 
 export const isSupabaseConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 
