@@ -20,6 +20,12 @@ import { buildSeedData, type SeedData } from '@/lib/seed';
 // `Record<string, unknown>` row constraint.
 type Row<T> = { [K in keyof T]: T[K] };
 
+/**
+ * What PostgREST actually returns for `project_pins`: `category` and `cost` have
+ * defaults but no NOT NULL, and `numeric` may arrive as a string.
+ */
+type PinRow = Row<Omit<ProjectPin, 'category' | 'cost'> & { category: PinCategory | null; cost: number | string | null }>;
+
 type ProjectInsert = Row<NewProjectInput & { id?: string; user_id?: string | null; created_at?: string }>;
 type PinInsert = Row<
   Omit<ProjectPin, 'id' | 'address' | 'category' | 'day_date' | 'sort_order' | 'notes' | 'cost' | 'created_at'> &
@@ -36,7 +42,7 @@ export interface Database {
         Relationships: [];
       };
       project_pins: {
-        Row: Row<ProjectPin>;
+        Row: PinRow;
         Insert: PinInsert;
         Update: Row<Partial<PinInsert>>;
         Relationships: [
@@ -80,8 +86,10 @@ export function getSupabaseClient(): TripSupabaseClient | null {
 /*  Row normalisation                                                          */
 /* -------------------------------------------------------------------------- */
 
-function toCategory(value: string): PinCategory {
-  return (PIN_CATEGORIES as readonly string[]).includes(value) ? (value as PinCategory) : 'other';
+/** NULL falls back to the column default; anything unexpected to `other`. */
+function toCategory(value: string | null): PinCategory {
+  if (value === null) return 'sightseeing';
+  return PIN_CATEGORIES.find((category) => category === value) ?? 'other';
 }
 
 /** PostgREST can serialise `numeric` / `double precision` as strings; coerce defensively. */
@@ -89,12 +97,13 @@ function toProject(row: Project): Project {
   return { ...row, center_lat: Number(row.center_lat), center_lng: Number(row.center_lng) };
 }
 
-function toPin(row: ProjectPin): ProjectPin {
+function toPin(row: PinRow): ProjectPin {
+  const cost = Number(row.cost ?? 0);
   return {
     ...row,
     lat: Number(row.lat),
     lng: Number(row.lng),
-    cost: Number(row.cost ?? 0),
+    cost: Number.isFinite(cost) ? cost : 0,
     sort_order: Number(row.sort_order ?? 0),
     category: toCategory(row.category),
   };
@@ -349,6 +358,16 @@ export function getTripService(): TripService {
   const client = getSupabaseClient();
   service = client ? new SupabaseTripService(client) : new LocalTripService();
   return service;
+}
+
+/** All trips, newest `start_date` first. */
+export function getProjects(): Promise<Project[]> {
+  return getTripService().listProjects();
+}
+
+/** A trip's pins ordered by `day_date` (Saved Places last), then `sort_order`. */
+export function getProjectPins(projectId: string): Promise<ProjectPin[]> {
+  return getTripService().listPins(projectId);
 }
 
 export function resetDemoData(): void {

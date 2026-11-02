@@ -20,8 +20,8 @@ export interface Project {
   destination_name: string;
   center_lat: number;
   center_lng: number;
-  start_date: ISODate;
-  end_date: ISODate;
+  start_date: string; // 'YYYY-MM-DD'
+  end_date: string; // 'YYYY-MM-DD'
   created_at: string;
 }
 
@@ -34,10 +34,10 @@ export interface ProjectPin {
   lat: number;
   lng: number;
   category: PinCategory;
-  day_date: ISODate | null;
+  day_date: string | null; // 'YYYY-MM-DD' or null for 'Saved Places'
   sort_order: number;
   notes: string | null;
-  cost: number;
+  cost: number; // numeric(10,2) coerced with Number(row.cost ?? 0)
   created_at: string;
 }
 
