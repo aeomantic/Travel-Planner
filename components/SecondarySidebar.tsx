@@ -8,6 +8,8 @@ import {
   ChevronDown,
   ChevronRight,
   Crosshair,
+  ListOrdered,
+  Map as MapIcon,
   MapPin,
   Pencil,
   Wallet,
@@ -20,6 +22,7 @@ import { useTripStore, type WorkspaceTab } from '@/store/useTripStore';
 import { AddPlaceInput } from '@/components/workspace/AddPlaceInput';
 import { BudgetPanel } from '@/components/workspace/BudgetPanel';
 import { BucketDropZone, PinBoard } from '@/components/workspace/PinBoard';
+import { SidebarToggle } from '@/components/PrimarySidebar';
 import { cn, formatCurrency, formatDateRange, parseISODate } from '@/lib/utils';
 
 const DRAWER_WIDTH = 420;
@@ -29,11 +32,40 @@ const drawerSpring = { type: 'spring', stiffness: 340, damping: 38, mass: 0.9 } 
 /*  Drawer shell                                                               */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * From 768px up the drawer pushes the map aside. On phones it becomes a full-screen
+ * sheet that trades places with the map via a floating toggle.
+ */
 export function SecondarySidebar() {
   const activeProjectId = useTripStore((s) => s.activeProjectId);
+  const mobile = useTripStore((s) => s.viewport === 'mobile');
+  const mobilePanel = useTripStore((s) => s.mobilePanel);
   // Keep rendering the last trip while the drawer animates closed.
   const [shownId, setShownId] = useState<string | null>(activeProjectId);
   if (activeProjectId !== null && activeProjectId !== shownId) setShownId(activeProjectId);
+
+  if (mobile) {
+    return (
+      <>
+        <AnimatePresence initial={false} onExitComplete={() => setShownId(null)}>
+          {activeProjectId && mobilePanel === 'workspace' && (
+            <motion.aside
+              key="workspace-sheet"
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={drawerSpring}
+              className="absolute inset-0 z-20 overflow-hidden bg-zinc-900"
+              aria-label="Trip workspace"
+            >
+              {shownId && <Workspace projectId={shownId} fluid />}
+            </motion.aside>
+          )}
+        </AnimatePresence>
+        {activeProjectId && <MobilePanelToggle />}
+      </>
+    );
+  }
 
   return (
     <AnimatePresence initial={false} onExitComplete={() => setShownId(null)}>
@@ -44,7 +76,7 @@ export function SecondarySidebar() {
           animate={{ width: DRAWER_WIDTH }}
           exit={{ width: 0 }}
           transition={drawerSpring}
-          className="relative z-20 h-full shrink-0 overflow-hidden border-r border-zinc-800 bg-zinc-900/95 backdrop-blur-md"
+          className="relative z-20 h-full shrink-0 overflow-hidden border-r border-zinc-800 bg-zinc-900/95 backdrop-blur-md max-md:hidden"
           aria-label="Trip workspace"
         >
           {shownId && <Workspace projectId={shownId} />}
@@ -54,7 +86,24 @@ export function SecondarySidebar() {
   );
 }
 
-function Workspace({ projectId }: { projectId: string }) {
+function MobilePanelToggle() {
+  const mobilePanel = useTripStore((s) => s.mobilePanel);
+  const setMobilePanel = useTripStore((s) => s.setMobilePanel);
+  const showingMap = mobilePanel === 'map';
+
+  return (
+    <button
+      type="button"
+      onClick={() => setMobilePanel(showingMap ? 'workspace' : 'map')}
+      className="fixed bottom-5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full bg-zinc-100 px-4 py-2.5 text-sm font-medium text-zinc-900 shadow-[0_10px_30px_-8px_rgba(0,0,0,0.7)] transition-transform active:scale-95"
+    >
+      {showingMap ? <ListOrdered className="size-4" /> : <MapIcon className="size-4" />}
+      {showingMap ? 'Itinerary' : 'Map'}
+    </button>
+  );
+}
+
+function Workspace({ projectId, fluid = false }: { projectId: string; fluid?: boolean }) {
   const { project, pins, days, buckets } = useItinerary(projectId);
   const activeTab = useTripStore((s) => s.activeTab);
   const pinsStatus = useTripStore((s) => s.pinsStatus[projectId] ?? 'idle');
@@ -69,9 +118,9 @@ function Workspace({ projectId }: { projectId: string }) {
   const loading = pinsStatus === 'loading' || pinsStatus === 'idle';
 
   return (
-    <div className="flex h-full flex-col" style={{ width: DRAWER_WIDTH }}>
+    <div className="flex h-full flex-col" style={{ width: fluid ? '100%' : DRAWER_WIDTH }}>
       <WorkspaceHeader project={project} pins={pins} savedCount={(buckets.get(UNASSIGNED) ?? []).length} />
-      <div ref={scrollRef} className="scrollbar-thin flex-1 overflow-y-auto px-4 pt-4 pb-24">
+      <div ref={scrollRef} className="scrollbar-thin flex-1 overflow-y-auto px-4 pt-4 pb-28">
         {loading ? (
           <PanelSkeleton />
         ) : (
@@ -107,8 +156,9 @@ function WorkspaceHeader({ project, pins, savedCount }: { project: Project; pins
   const total = sumCost(pins);
 
   return (
-    <header className="relative z-10 shrink-0 border-b border-zinc-800 bg-zinc-900/95 px-5 pt-4 backdrop-blur-md">
+    <header className="relative z-10 shrink-0 border-b border-zinc-800 bg-zinc-900/95 px-4 pt-4 backdrop-blur-md sm:px-5">
       <div className="flex items-start gap-3">
+        <SidebarToggle className="mt-0.5" />
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-1.5 text-xs text-zinc-500">
             <MapPin className="size-3.5" />

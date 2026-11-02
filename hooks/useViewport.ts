@@ -1,7 +1,7 @@
 'use client';
 
-import { useSyncExternalStore } from 'react';
-import type { Viewport } from '@/store/useTripStore';
+import { useLayoutEffect } from 'react';
+import { useTripStore, type Viewport } from '@/store/useTripStore';
 
 const QUERIES = {
   wide: '(min-width: 1280px)',
@@ -9,22 +9,28 @@ const QUERIES = {
   tablet: '(min-width: 768px)',
 } as const;
 
-function getSnapshot(): Viewport {
+function readViewport(): Viewport {
   if (window.matchMedia(QUERIES.wide).matches) return 'wide';
   if (window.matchMedia(QUERIES.desktop).matches) return 'desktop';
   if (window.matchMedia(QUERIES.tablet).matches) return 'tablet';
   return 'mobile';
 }
 
-function subscribe(onChange: () => void): () => void {
-  const lists = Object.values(QUERIES).map((query) => window.matchMedia(query));
-  for (const list of lists) list.addEventListener('change', onChange);
-  return () => {
-    for (const list of lists) list.removeEventListener('change', onChange);
-  };
-}
+/**
+ * Keeps `store.viewport` in sync with Tailwind's md / lg / xl breakpoints.
+ * Reads `matchMedia` directly in a layout effect, before the first client paint,
+ * so the layout never renders for a guessed size and then animates to the real one.
+ */
+export function useViewportSync(): void {
+  const setViewport = useTripStore((s) => s.setViewport);
 
-/** Breakpoint bucket matching Tailwind's md / lg / xl. Server render assumes `wide`. */
-export function useViewport(): Viewport {
-  return useSyncExternalStore(subscribe, getSnapshot, () => 'wide');
+  useLayoutEffect(() => {
+    const update = () => setViewport(readViewport());
+    update();
+    const lists = Object.values(QUERIES).map((query) => window.matchMedia(query));
+    for (const list of lists) list.addEventListener('change', update);
+    return () => {
+      for (const list of lists) list.removeEventListener('change', update);
+    };
+  }, [setViewport]);
 }

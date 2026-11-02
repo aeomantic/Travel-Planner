@@ -182,7 +182,7 @@ export function PinBoard({ bucketKeys, buckets, pinsById, days, children }: PinB
                 meta={metaAt(activeBucket, (items[activeBucket] ?? []).indexOf(activePin.id), days)}
                 days={days}
                 overlay
-                className="w-[388px] rotate-[1.5deg]"
+                className="rotate-[1.5deg]"
               />
             ) : null}
           </DragOverlay>,

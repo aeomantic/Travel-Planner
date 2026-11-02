@@ -10,7 +10,7 @@ export function Toaster() {
   const dismiss = useTripStore((s) => s.dismissNotice);
 
   return (
-    <div className="pointer-events-none fixed bottom-5 left-1/2 z-50 flex w-[min(420px,calc(100vw-32px))] -translate-x-1/2 flex-col items-center gap-2">
+    <div className="pointer-events-none fixed bottom-20 left-1/2 md:bottom-5 z-50 flex w-[min(420px,calc(100vw-32px))] -translate-x-1/2 flex-col items-center gap-2">
       <AnimatePresence initial={false}>
         {notices.map((notice) => (
           <motion.div

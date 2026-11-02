@@ -37,3 +37,8 @@ The basemap is CartoDB Dark Matter and place search uses Photon (OpenStreetMap).
 - Writes run in order through a single queue. If a write fails, the change is rolled back and an error toast appears.
 - Shrinking a trip's date range moves pins from the removed days to Saved Places.
 - Markers can be dragged to correct a location. Clicking a marker opens and scrolls to its card.
+- Responsive layout:
+  - **≥1280px:** both sidebars are docked.
+  - **1024–1279px:** the trips sidebar starts collapsed and can be docked open.
+  - **768–1023px:** the trips sidebar slides over the page.
+  - **<768px:** the itinerary is a full-screen sheet, and a floating Map / Itinerary button switches between it and the map.

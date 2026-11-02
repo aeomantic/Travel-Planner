@@ -21,12 +21,15 @@ import { reverseGeocode } from '@/lib/geocode';
 import { useItinerary } from '@/hooks/useItinerary';
 import { useTripStore, type CameraCommand, type DraftPin } from '@/store/useTripStore';
 import { CategoryIcon } from '@/components/ui/CategoryIcon';
+import { SidebarToggle } from '@/components/PrimarySidebar';
 import { cn } from '@/lib/utils';
 
 /** Free, keyless vector basemap. */
 const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
 const INITIAL_VIEW = { longitude: 139.65, latitude: 35.67, zoom: 1.6 };
 const FIT_PADDING = { top: 110, bottom: 70, left: 70, right: 80 };
+/** Narrow maps: keep the frame clear of the filter panel and the mobile Map/Itinerary pill. */
+const FIT_PADDING_COMPACT = { top: 120, bottom: 90, left: 36, right: 36 };
 /** Wait for the drawer's width animation to settle before framing. */
 const FIT_SETTLE_MS = 140;
 const FIT_MAX_WAIT_MS = 900;
@@ -76,6 +79,7 @@ export default function MapCanvas() {
   const selectPin = useTripStore((s) => s.selectPin);
   const setMapCenter = useTripStore((s) => s.setMapCenter);
   const setActiveProject = useTripStore((s) => s.setActiveProject);
+  const mobile = useTripStore((s) => s.viewport === 'mobile');
 
   const { project, pins, days, meta } = useItinerary(activeProjectId);
 
@@ -142,7 +146,13 @@ export default function MapCanvas() {
       return;
     }
     const bounds = points.reduce((b, point) => b.extend(point), new LngLatBounds(points[0], points[0]));
-    map.fitBounds(bounds, { padding: FIT_PADDING, maxZoom: project ? 14.5 : 5, duration: 1200, essential: true });
+    const compact = (containerRef.current?.clientWidth ?? 1024) < 640;
+    map.fitBounds(bounds, {
+      padding: compact ? FIT_PADDING_COMPACT : FIT_PADDING,
+      maxZoom: project ? 14.5 : 5,
+      duration: 1200,
+      essential: true,
+    });
   }, [project, projects, visible]);
 
   const fitRef = useRef(fitNow);
@@ -261,6 +271,9 @@ export default function MapCanvas() {
         {project && draftPin && <DropPinPopup key={`${draftPin.lat},${draftPin.lng}`} draft={draftPin} days={days} filter={dayFilter} />}
       </Map>
 
+      {/* When a workspace drawer is docked, its header carries the toggle instead. */}
+      {(!project || mobile) && <SidebarToggle className="absolute top-4 left-4 z-10" />}
+
       <AnimatePresence>
         {project && <DayFilterPanel key="filters" days={days} savedCount={pins.filter((p) => meta.get(p.id)?.bucket === UNASSIGNED).length} />}
       </AnimatePresence>
@@ -272,12 +285,12 @@ export default function MapCanvas() {
       )}
 
       {project ? (
-        <div className="pointer-events-none absolute bottom-4 left-4 z-10 flex items-center gap-2 rounded-xl border border-zinc-700/60 bg-zinc-900/80 px-3 py-2 text-xs text-zinc-400 backdrop-blur-md">
+        <div className="pointer-events-none absolute bottom-4 left-4 z-10 hidden items-center gap-2 rounded-xl sm:flex border border-zinc-700/60 bg-zinc-900/80 px-3 py-2 text-xs text-zinc-400 backdrop-blur-md">
           <MousePointerClick className="size-3.5 text-indigo-400" />
           Click the map to drop a pin · drag markers to move them
         </div>
       ) : (
-        <div className="pointer-events-none absolute top-5 left-1/2 z-10 -translate-x-1/2 rounded-xl border border-zinc-700/60 bg-zinc-900/80 px-4 py-2.5 text-center backdrop-blur-md">
+        <div className="pointer-events-none absolute top-16 left-1/2 z-10 -translate-x-1/2 rounded-xl border whitespace-nowrap sm:top-5 border-zinc-700/60 bg-zinc-900/80 px-4 py-2.5 text-center backdrop-blur-md">
           <p className="text-sm font-medium text-zinc-100">Pick a trip to start planning</p>
           <p className="text-xs text-zinc-500">Or create one with New Trip</p>
         </div>
@@ -388,7 +401,7 @@ function DayFilterPanel({ days, savedCount }: { days: TripDay[]; savedCount: num
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -6 }}
       transition={{ duration: 0.18 }}
-      className="absolute top-4 right-4 z-10 flex max-w-[min(360px,calc(100%-32px))] items-start gap-2"
+      className="absolute top-4 right-4 z-10 flex max-w-[min(360px,calc(100%-76px))] items-start gap-2"
     >
       <div className="rounded-xl border border-zinc-700/60 bg-zinc-900/80 p-1.5 shadow-[0_10px_30px_-12px_rgba(0,0,0,0.6)] backdrop-blur-md">
         <p className="flex items-center gap-1.5 px-1.5 pt-0.5 pb-1.5 text-[11px] font-medium text-zinc-400">

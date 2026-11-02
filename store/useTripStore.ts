@@ -66,7 +66,8 @@ interface TripState {
   pendingWrites: number;
   notices: Notice[];
 
-  viewport: Viewport;
+  /** `null` until the client has measured the window (the server can't know it). */
+  viewport: Viewport | null;
   /** `null` = automatic: open on wide screens, closed below. */
   primaryOpen: boolean | null;
   /** Phones show the workspace and the map one at a time. */
@@ -206,7 +207,7 @@ export const useTripStore = create<TripState>()((set, get) => {
     pendingWrites: 0,
     notices: [],
 
-    viewport: 'wide',
+    viewport: null,
     primaryOpen: null,
     mobilePanel: 'workspace',
 

@@ -11,6 +11,8 @@ import {
   HardDrive,
   LoaderCircle,
   MapPin,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   RotateCcw,
   Search,
@@ -18,7 +20,7 @@ import {
   X,
 } from 'lucide-react';
 import type { NewProjectInput, Project } from '@/types/trip';
-import { useTripStore } from '@/store/useTripStore';
+import { selectPrimaryDocked, selectPrimaryOpen, useTripStore } from '@/store/useTripStore';
 import { usePlaceSearch } from '@/hooks/usePlaceSearch';
 import type { PlaceResult } from '@/lib/geocode';
 import { resetDemoData } from '@/lib/supabaseClient';
@@ -29,13 +31,115 @@ import { cn, formatDateRange, formatDateRangeLong, parseISODate, toISODate, toda
 /*  Sidebar                                                                    */
 /* -------------------------------------------------------------------------- */
 
+const sidebarSpring = { type: 'spring', stiffness: 340, damping: 38, mass: 0.9 } as const;
+const SIDEBAR_WIDTH = 260;
+
+/**
+ * Docked and collapsible (pushes the map) from 1024px up; below that it slides
+ * over the app as a drawer and closes itself after navigation.
+ */
 export function PrimarySidebar() {
+  const open = useTripStore(selectPrimaryOpen);
+  const docked = useTripStore(selectPrimaryDocked);
+  const setPrimaryOpen = useTripStore((s) => s.setPrimaryOpen);
+  const [modalOpen, setModalOpen] = useState(false);
+
+  const content = (
+    <SidebarContent
+      onNewTrip={() => {
+        setModalOpen(true);
+        if (!docked) setPrimaryOpen(false);
+      }}
+      onNavigate={() => {
+        if (!docked) setPrimaryOpen(false);
+      }}
+      onCollapse={() => setPrimaryOpen(false)}
+    />
+  );
+
+  return (
+    <>
+      {/* Distinct keys: crossing the breakpoint swaps modes instead of animating one into the other. */}
+      {docked ? (
+        <AnimatePresence key="docked" initial={false}>
+          {open && (
+            <motion.aside
+              key="primary-docked"
+              initial={{ width: 0 }}
+              animate={{ width: SIDEBAR_WIDTH }}
+              exit={{ width: 0 }}
+              transition={sidebarSpring}
+              className="relative z-30 h-full shrink-0 overflow-hidden border-r border-zinc-800/80 bg-zinc-950 max-lg:hidden"
+            >
+              <div className="h-full" style={{ width: SIDEBAR_WIDTH }}>
+                {content}
+              </div>
+            </motion.aside>
+          )}
+        </AnimatePresence>
+      ) : (
+        <AnimatePresence key="overlay">
+          {open && (
+            <motion.div key="primary-overlay" className="fixed inset-0 z-40" initial="hidden" animate="shown" exit="hidden">
+              <motion.div
+                className="absolute inset-0 bg-black/55 backdrop-blur-[2px]"
+                variants={{ hidden: { opacity: 0 }, shown: { opacity: 1 } }}
+                transition={{ duration: 0.18 }}
+                onClick={() => setPrimaryOpen(false)}
+                aria-hidden
+              />
+              <motion.aside
+                variants={{ hidden: { x: '-100%' }, shown: { x: 0 } }}
+                transition={sidebarSpring}
+                className="absolute inset-y-0 left-0 w-[280px] max-w-[85vw] border-r border-zinc-800/80 bg-zinc-950 shadow-2xl shadow-black/60"
+                aria-label="Trips sidebar"
+              >
+                {content}
+              </motion.aside>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      )}
+      <NewTripModal open={modalOpen} onClose={() => setModalOpen(false)} />
+    </>
+  );
+}
+
+/** Reopens the primary sidebar; rendered wherever the collapsed sidebar used to be. */
+export function SidebarToggle({ className }: { className?: string }) {
+  const open = useTripStore(selectPrimaryOpen);
+  const setPrimaryOpen = useTripStore((s) => s.setPrimaryOpen);
+  if (open) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => setPrimaryOpen(true)}
+      title="Show trips"
+      aria-label="Show trips"
+      className={cn(
+        'grid size-9 shrink-0 place-items-center rounded-xl border border-zinc-700/60 bg-zinc-900/80 text-zinc-300 backdrop-blur-md transition-colors hover:bg-zinc-800 hover:text-zinc-50',
+        className,
+      )}
+    >
+      <PanelLeftOpen className="size-4" />
+    </button>
+  );
+}
+
+function SidebarContent({
+  onNewTrip,
+  onNavigate,
+  onCollapse,
+}: {
+  onNewTrip: () => void;
+  onNavigate: () => void;
+  onCollapse: () => void;
+}) {
   const projects = useTripStore((s) => s.projects);
   const status = useTripStore((s) => s.projectsStatus);
   const activeProjectId = useTripStore((s) => s.activeProjectId);
   const setActiveProject = useTripStore((s) => s.setActiveProject);
   const deleteProject = useTripStore((s) => s.deleteProject);
-  const [modalOpen, setModalOpen] = useState(false);
   const [filter, setFilter] = useState('');
 
   const { upcoming, past } = useMemo(() => {
@@ -50,22 +154,36 @@ export function PrimarySidebar() {
     };
   }, [projects, filter]);
 
+  const select = (id: string) => {
+    setActiveProject(id);
+    onNavigate();
+  };
+
   return (
-    <aside className="relative z-30 flex h-full w-[260px] shrink-0 flex-col border-r border-zinc-800/80 bg-zinc-950 text-zinc-100">
+    <div className="flex h-full flex-col text-zinc-100">
       <div className="flex items-center gap-2.5 px-4 pt-4 pb-3">
         <div className="grid size-8 place-items-center rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 shadow-[0_0_20px_-4px_rgba(99,102,241,0.7)]">
           <Compass className="size-[18px] text-white" strokeWidth={2.25} />
         </div>
-        <div className="leading-tight">
+        <div className="flex-1 leading-tight">
           <p className="text-sm font-semibold tracking-tight">Wayfarer</p>
           <p className="text-[11px] text-zinc-500">Trip planner</p>
         </div>
+        <button
+          type="button"
+          onClick={onCollapse}
+          title="Hide trips"
+          aria-label="Hide trips"
+          className="-mr-1.5 rounded-lg p-1.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+        >
+          <PanelLeftClose className="size-4" />
+        </button>
       </div>
 
       <div className="px-3">
         <button
           type="button"
-          onClick={() => setModalOpen(true)}
+          onClick={onNewTrip}
           className="flex w-full items-center gap-2 rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-indigo-500 hover:shadow-[0_0_24px_-6px_rgba(99,102,241,0.85)] focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:outline-none active:scale-[0.98]"
         >
           <Plus className="size-4" strokeWidth={2.5} />
@@ -95,26 +213,12 @@ export function PrimarySidebar() {
         {status === 'ready' && filter && upcoming.length + past.length === 0 && (
           <p className="px-3 text-xs text-zinc-500">No trips match “{filter}”.</p>
         )}
-        <TripGroup
-          label="Upcoming Trips"
-          projects={upcoming}
-          activeId={activeProjectId}
-          onSelect={setActiveProject}
-          onDelete={deleteProject}
-        />
-        <TripGroup
-          label="Past Trips"
-          projects={past}
-          activeId={activeProjectId}
-          onSelect={setActiveProject}
-          onDelete={deleteProject}
-        />
+        <TripGroup label="Upcoming Trips" projects={upcoming} activeId={activeProjectId} onSelect={select} onDelete={deleteProject} />
+        <TripGroup label="Past Trips" projects={past} activeId={activeProjectId} onSelect={select} onDelete={deleteProject} />
       </nav>
 
       <SyncStatus />
-
-      <NewTripModal open={modalOpen} onClose={() => setModalOpen(false)} />
-    </aside>
+    </div>
   );
 }
 
