@@ -44,15 +44,17 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 0,
 });
 
-const preciseCurrencyFormatter = new Intl.NumberFormat('en-US', {
+const centsFormatter = new Intl.NumberFormat('en-US', {
   style: 'currency',
   currency: 'USD',
-  minimumFractionDigits: 0,
+  minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
 
+/** `precise` shows cents only when there are any: `$12`, `$6.50` (never `$6.5`). */
 export function formatCurrency(value: number, precise = false): string {
-  return (precise ? preciseCurrencyFormatter : currencyFormatter).format(value);
+  if (!precise || Number.isInteger(roundMoney(value))) return currencyFormatter.format(value);
+  return centsFormatter.format(value);
 }
 
 export function roundMoney(value: number): number {
