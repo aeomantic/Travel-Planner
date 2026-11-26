@@ -1,12 +1,16 @@
-/** What the Cafés panel shows: facts scraped from Singapore food guides, never their prose. */
+/**
+ * What the Cafés panel shows: cafés from OpenStreetMap, facts scraped from Singapore food guides
+ * (never their prose), and cafés from the official CDC Vouchers merchant directory.
+ */
 
-export type CafeType = 'specialty-coffee' | 'brunch' | 'bakery' | 'dessert' | 'work-friendly' | 'cafe';
+export type CafeType = 'specialty-coffee' | 'brunch' | 'bakery' | 'dessert' | 'traditional' | 'work-friendly' | 'cafe';
 
 export const CAFE_TYPES: readonly CafeType[] = [
   'specialty-coffee',
   'brunch',
   'bakery',
   'dessert',
+  'traditional',
   'work-friendly',
   'cafe',
 ] as const;
@@ -16,6 +20,7 @@ export const CAFE_TYPE_LABELS: Record<CafeType, string> = {
   brunch: 'Brunch',
   bakery: 'Bakery',
   dessert: 'Dessert',
+  traditional: 'Kopi & toast',
   'work-friendly': 'Work-friendly',
   cafe: 'Café',
 };
@@ -27,12 +32,13 @@ export const PRICE_TIERS: readonly PriceTier[] = ['$', '$$', '$$$'] as const;
 export type HalalStatus = 'certified' | 'no-pork-lard' | 'not-certified';
 
 export interface Cafe {
-  /** Slug of the name; stable across scrapes. */
+  /** Slug of the name (plus the postcode or OSM id for branches); stable across scrapes. */
   id: string;
   name: string;
   /** Neighbourhood from the guide's section heading, else from the postal district. */
   area: string | null;
-  address: string;
+  /** Null for OpenStreetMap cafés mapped without an address. */
+  address: string | null;
   postalCode: string | null;
   lat: number | null;
   lng: number | null;
@@ -46,8 +52,15 @@ export interface Cafe {
   /** Charging ports / power sockets: true or false when the guide says so, null when it doesn't. */
   charging: boolean | null;
   halal: HalalStatus | null;
+  /**
+   * Takes CDC Vouchers: listed in the official CDC merchant directory at this address, or in a
+   * guide to cafés that accept them. false only means we found no listing.
+   */
+  cdcVouchers: boolean;
+  /** One of several outlets: an OpenStreetMap brand, or a name with four or more outlets here. */
+  chain: boolean;
   website: string | null;
-  /** The guide entry this came from (article URL + anchor). */
+  /** The guide entry, OpenStreetMap feature or directory search this came from. */
   sourceUrl: string;
   sourceTitle: string;
 }
@@ -86,6 +99,13 @@ export const CHARGING_LABEL: Record<'yes' | 'no' | 'unknown', string> = {
 
 export function chargingKey(value: boolean | null): keyof typeof CHARGING_LABEL {
   return value === true ? 'yes' : value === false ? 'no' : 'unknown';
+}
+
+/** Short name for the link back to where a café was found. */
+export function sourceLabel(sourceUrl: string): string {
+  if (sourceUrl.includes('gowhere.gov.sg')) return 'CDC GoWhere';
+  if (sourceUrl.includes('openstreetmap.org')) return 'OSM';
+  return 'Eatbook';
 }
 
 export const HALAL_LABEL: Record<HalalStatus, string> = {

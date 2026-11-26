@@ -32,7 +32,10 @@ import type { Cafe } from '@/lib/cafes/types';
 export type WorkspaceTab = 'itinerary' | 'saved' | 'budget' | 'cafes';
 
 /** A scraped café drawn on the map (see components/workspace/CafesPanel). */
-export type CafeMarker = Pick<Cafe, 'id' | 'name' | 'priceTier' | 'types' | 'charging'> & { lat: number; lng: number };
+export type CafeMarker = Pick<Cafe, 'id' | 'name' | 'priceTier' | 'types' | 'charging' | 'cdcVouchers'> & {
+  lat: number;
+  lng: number;
+};
 /** mobile < 768 ≤ tablet < 1024 ≤ desktop < 1280 ≤ wide */
 export type Viewport = 'mobile' | 'tablet' | 'desktop' | 'wide';
 export type MobilePanel = 'workspace' | 'map';

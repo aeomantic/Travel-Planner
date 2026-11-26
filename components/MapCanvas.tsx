@@ -14,7 +14,7 @@ import Map, {
 } from 'react-map-gl/maplibre';
 import { LngLatBounds } from 'maplibre-gl';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bookmark, Coffee, Eye, Layers, LoaderCircle, MousePointerClick, Plus, Scan, X, Zap } from 'lucide-react';
+import { Bookmark, Coffee, Eye, Layers, LoaderCircle, MousePointerClick, Plus, Scan, Ticket, X, Zap } from 'lucide-react';
 import { PIN_CATEGORIES, UNASSIGNED, type BucketKey, type DayFilter, type PinCategory, type Project, type ProjectPin, type TripDay } from '@/types/trip';
 import { CATEGORY_LABELS, matchesFilter, tripColorMap, UNASSIGNED_COLOR, type PinDisplayMeta } from '@/lib/itinerary';
 import { reverseGeocode } from '@/lib/geocode';
@@ -76,6 +76,28 @@ interface VisiblePin {
 
 const EMPTY_CAFES: CafeMarker[] = [];
 
+interface PointCollection {
+  type: 'FeatureCollection';
+  features: { type: 'Feature'; properties: { id: string }; geometry: { type: 'Point'; coordinates: [number, number] } }[];
+}
+
+/**
+ * The Cafés tab's cafés, drawn by the GPU: there can be several hundred, too many for DOM markers.
+ * The hovered or focused one also gets a DOM marker (CafePinMarker) with its name.
+ */
+const CAFE_LAYER_ID = 'cafe-dots';
+const cafeDots: LayerProps = {
+  id: CAFE_LAYER_ID,
+  type: 'circle',
+  paint: {
+    'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 3.5, 14, 6, 17, 8],
+    'circle-color': '#fbbf24',
+    'circle-opacity': 0.85,
+    'circle-stroke-color': '#09090b',
+    'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 10, 1, 14, 2],
+  },
+};
+
 export default function MapCanvas() {
   const mapRef = useRef<MapRef>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -102,6 +124,23 @@ export default function MapCanvas() {
   const allCafeMarkers = useTripStore((s) => s.cafeMarkers);
   const cafeMarkers = showCafes ? allCafeMarkers : EMPTY_CAFES;
   const focusCafe = useTripStore((s) => s.focusCafe);
+  const focusedCafeId = useTripStore((s) => s.focusedCafeId);
+  const [hoveredCafeId, setHoveredCafeId] = useState<string | null>(null);
+  const cafeById = useMemo(() => new globalThis.Map(cafeMarkers.map((c) => [c.id, c])), [cafeMarkers]);
+  const cafePoints = useMemo<PointCollection>(
+    () => ({
+      type: 'FeatureCollection',
+      features: cafeMarkers.map((c) => ({
+        type: 'Feature',
+        properties: { id: c.id },
+        geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
+      })),
+    }),
+    [cafeMarkers],
+  );
+  const liftedCafes = [...new Set([focusedCafeId, hoveredCafeId])]
+    .map((id) => (id ? cafeById.get(id) : undefined))
+    .filter((c): c is CafeMarker => c !== undefined);
 
   // Project Overview: every trip in the folder at once, one colour per trip.
   const activeFolder = useTripStore(selectActiveFolder);
@@ -265,8 +304,18 @@ export default function MapCanvas() {
 
   /* ------------------------------------------------------------ events --- */
 
+  const cafeAt = (e: MapLayerMouseEvent): CafeMarker | undefined => {
+    const id: unknown = e.features?.find((f) => f.layer.id === CAFE_LAYER_ID)?.properties?.id;
+    return typeof id === 'string' ? cafeById.get(id) : undefined;
+  };
+
   const onMapClick = (e: MapLayerMouseEvent) => {
     if (!project) return;
+    const cafe = cafeAt(e);
+    if (cafe) {
+      focusCafe(cafe);
+      return;
+    }
     selectPin(null);
     focusCafe(null);
     // Viewers can pan and inspect, but never drop pins.
@@ -278,6 +327,14 @@ export default function MapCanvas() {
     setMapCenter({ lat: e.viewState.latitude, lng: e.viewState.longitude });
   };
 
+  // Cleared here and when the pointer leaves the café's DOM marker, not on the layer's mouseleave,
+  // which fires as soon as that marker appears under the pointer.
+  const onMouseMove = (e: MapLayerMouseEvent) => {
+    const id = cafeAt(e)?.id ?? null;
+    if (id !== hoveredCafeId) setHoveredCafeId(id);
+  };
+  const unhoverCafe = useCallback((id: string) => setHoveredCafeId((current) => (current === id ? null : current)), []);
+
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-[#0e0e10]">
       <Map
@@ -286,9 +343,11 @@ export default function MapCanvas() {
         mapStyle={MAP_STYLE}
         style={{ width: '100%', height: '100%' }}
         attributionControl={{ compact: true }}
-        cursor={project && canEdit ? 'crosshair' : 'grab'}
+        cursor={hoveredCafeId ? 'pointer' : project && canEdit ? 'crosshair' : 'grab'}
+        interactiveLayerIds={project ? [CAFE_LAYER_ID] : undefined}
         onLoad={() => setLoaded(true)}
         onClick={onMapClick}
+        onMouseMove={project ? onMouseMove : undefined}
         onMoveEnd={onMoveEnd}
         onError={(e) => console.warn('[map]', e.error?.message)}
         dragRotate={false}
@@ -304,7 +363,13 @@ export default function MapCanvas() {
           </Source>
         )}
 
-        {project && cafeMarkers.map((cafe) => <CafePinMarker key={cafe.id} cafe={cafe} />)}
+        {project && (
+          <Source id="cafes" type="geojson" data={cafePoints}>
+            <Layer {...cafeDots} />
+          </Source>
+        )}
+
+        {project && liftedCafes.map((cafe) => <CafePinMarker key={cafe.id} cafe={cafe} onLeave={unhoverCafe} />)}
 
         {project && visible.map(({ pin, meta: m }) => <PinMarker key={pin.id} pin={pin} meta={m} />)}
 
@@ -446,12 +511,13 @@ const PinMarker = memo(function PinMarker({ pin, meta }: { pin: ProjectPin; meta
   );
 });
 
-/** A café from the Cafés tab: small amber cup under the trip's pins; clicking highlights it in the list. */
-const CafePinMarker = memo(function CafePinMarker({ cafe }: { cafe: CafeMarker }) {
+/**
+ * The hovered or focused café from the Cafés tab, raised above its dot in the café layer with
+ * its name; clicking highlights it in the list.
+ */
+const CafePinMarker = memo(function CafePinMarker({ cafe, onLeave }: { cafe: CafeMarker; onLeave: (id: string) => void }) {
   const focused = useTripStore((s) => s.focusedCafeId === cafe.id);
   const focusCafe = useTripStore((s) => s.focusCafe);
-  const [hovered, setHovered] = useState(false);
-  const lifted = focused || hovered;
   const kind = CAFE_TYPE_LABELS[cafe.types[0] ?? 'cafe'];
 
   return (
@@ -459,47 +525,47 @@ const CafePinMarker = memo(function CafePinMarker({ cafe }: { cafe: CafeMarker }
       longitude={cafe.lng}
       latitude={cafe.lat}
       anchor="center"
-      style={{ zIndex: lifted ? 25 : 0 }}
+      style={{ zIndex: 25 }}
       onClick={(e) => {
         e.originalEvent.stopPropagation();
         focusCafe(cafe);
       }}
     >
-      <div className="relative" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
-        <div
+      <div className="relative" onMouseLeave={() => onLeave(cafe.id)}>
+        <motion.div
           role="button"
           aria-label={`${cafe.name}, café`}
           aria-pressed={focused}
-          className={cn(
-            'grid size-5 cursor-pointer place-items-center rounded-full border-2 border-zinc-950 bg-amber-400 text-zinc-950 shadow-[0_2px_10px_rgba(0,0,0,0.55)] transition-all duration-200 ease-out',
-            lifted ? 'scale-[1.35] ring-4 ring-amber-400/35' : 'opacity-85',
-          )}
+          initial={{ scale: 0.75 }}
+          animate={{ scale: 1.35 }}
+          transition={{ duration: 0.15, ease: 'easeOut' }}
+          className="grid size-5 cursor-pointer place-items-center rounded-full border-2 border-zinc-950 bg-amber-400 text-zinc-950 shadow-[0_2px_10px_rgba(0,0,0,0.55)] ring-4 ring-amber-400/35"
         >
           <Coffee className="size-2.5" strokeWidth={3} />
-        </div>
-        <AnimatePresence>
-          {lifted && (
-            <motion.div
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 4 }}
-              transition={{ duration: 0.12 }}
-              className="pointer-events-none absolute bottom-full left-1/2 mb-2.5 -translate-x-1/2 rounded-lg border border-zinc-700/70 bg-zinc-900/95 px-2.5 py-1.5 whitespace-nowrap shadow-xl backdrop-blur-md"
-            >
-              <p className="text-xs font-medium text-zinc-100">{cafe.name}</p>
-              <p className="flex items-center gap-1 text-[10.5px] text-zinc-400">
-                <Coffee className="size-3 text-amber-300" />
-                {kind}
-                {cafe.priceTier && <span className="font-mono text-emerald-300">· {cafe.priceTier}</span>}
-                {cafe.charging === true && (
-                  <span className="inline-flex items-center gap-0.5 text-amber-200">
-                    · <Zap className="size-3" /> Charging
-                  </span>
-                )}
-              </p>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        </motion.div>
+        <motion.div
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.12 }}
+          className="pointer-events-none absolute bottom-full left-1/2 mb-2.5 -translate-x-1/2 rounded-lg border border-zinc-700/70 bg-zinc-900/95 px-2.5 py-1.5 whitespace-nowrap shadow-xl backdrop-blur-md"
+        >
+          <p className="text-xs font-medium text-zinc-100">{cafe.name}</p>
+          <p className="flex items-center gap-1 text-[10.5px] text-zinc-400">
+            <Coffee className="size-3 text-amber-300" />
+            {kind}
+            {cafe.priceTier && <span className="font-mono text-emerald-300">· {cafe.priceTier}</span>}
+            {cafe.charging === true && (
+              <span className="inline-flex items-center gap-0.5 text-amber-200">
+                · <Zap className="size-3" /> Charging
+              </span>
+            )}
+            {cafe.cdcVouchers && (
+              <span className="inline-flex items-center gap-0.5 text-sky-300">
+                · <Ticket className="size-3" /> CDC
+              </span>
+            )}
+          </p>
+        </motion.div>
       </div>
     </Marker>
   );

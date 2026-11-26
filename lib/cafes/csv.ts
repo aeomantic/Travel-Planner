@@ -20,6 +20,8 @@ const COLUMNS: [header: string, value: (cafe: Cafe) => CellValue][] = [
   ['Cafe type', (c) => c.types.map((t) => CAFE_TYPE_LABELS[t]).join('; ')],
   ['Charging ports', (c) => CHARGING_LABEL[chargingKey(c.charging)]],
   ['Halal', (c) => (c.halal ? HALAL_LABEL[c.halal] : null)],
+  ['CDC vouchers', (c) => (c.cdcVouchers ? 'Yes' : 'Not listed')],
+  ['Chain', (c) => (c.chain ? 'Yes' : 'No')],
   ['Opening hours', (c) => c.hours],
   ['Latitude', (c) => c.lat],
   ['Longitude', (c) => c.lng],

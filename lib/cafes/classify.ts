@@ -66,6 +66,12 @@ const TYPE_RULES: TypeRule[] = [
     weak: /\b(?:desserts?|cakes?|waffles?|tiramisu|ice cream|tarts?|parfaits?|durian|mochi|puddings?)\b/gi,
   },
   {
+    type: 'traditional',
+    strong: /kaya toast|kopitiam|nanyang (?:coffee|kopi)|traditional (?:kopi|coffee)|\bkopi[- ](?:o|c|peng|siew dai)\b/i,
+    // Not "toast" on its own: French and avocado toast are brunch.
+    weak: /\b(?:kopi|kaya|teh|soft[- ]boiled eggs)\b/gi,
+  },
+  {
     type: 'work-friendly',
     strong: /work[- ]friendly|co-?working|remote work|laptops?|study(?:ing)? (?:spot|cafe|session)|for (?:studying|working)/i,
     weak: /\b(?:wi-?fi|charging (?:points?|ports?|stations?)|power (?:points?|sockets?)|quiet|plugs?)\b/gi,
@@ -130,6 +136,50 @@ export function slugify(name: string): string {
     .replace(/&/g, ' and ')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
+}
+
+/* -------------------------------------------------------------- matching --- */
+
+const MATCH_STOPWORDS = new Set(
+  'the and n cafe cafes coffee co sg pte ltd llp bakery bakehouse bar house shop by at s'.split(' '),
+);
+
+/** Matching runs over thousands of names per refresh, many of them repeats. */
+const tokenMemo = new Map<string, string[]>();
+
+function matchTokens(name: string): string[] {
+  let tokens = tokenMemo.get(name);
+  if (!tokens) {
+    if (tokenMemo.size > 50_000) tokenMemo.clear();
+    tokens = tokenize(name);
+    tokenMemo.set(name, tokens);
+  }
+  return tokens;
+}
+
+function tokenize(name: string): string[] {
+  return name
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/['’]s\b/g, '')
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t && !MATCH_STOPWORDS.has(t))
+    .map((t) => (t.length > 3 && t.endsWith('s') ? t.slice(0, -1) : t));
+}
+
+/** "Puff And Peaks" ~ "PUFFS AND PEAKS BAKERY CAFE"; "Meadowbrewsg" ~ "MEADOW BREW"; "Nylon Coffee" ~ "NYLON COFFEE ROASTERS". */
+export function sameBusiness(a: string, b: string): boolean {
+  const ta = matchTokens(a);
+  const tb = matchTokens(b);
+  if (ta.length === 0 || tb.length === 0) return slugify(a) === slugify(b);
+  const ca = ta.join('');
+  const cb = tb.join('');
+  if (ca === cb) return true;
+  if (Math.min(ca.length, cb.length) >= 4 && (ca.includes(cb) || cb.includes(ca))) return true;
+  const shared = ta.filter((t) => t.length >= 3 && tb.includes(t)).length;
+  return shared > 0 && shared / Math.min(ta.length, tb.length) >= 0.5;
 }
 
 /* ----------------------------------------------------------------- hours --- */

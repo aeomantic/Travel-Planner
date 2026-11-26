@@ -10,6 +10,7 @@ import {
   median,
   postalCodeIn,
   pricesIn,
+  sameBusiness,
   slugify,
   tierFor,
   typesFrom,
@@ -27,11 +28,14 @@ export interface EatbookArticle {
   title: string;
   /** Every café in the guide is picked for working or studying. */
   workFriendly?: boolean;
+  /** Every café in the guide takes CDC Vouchers. */
+  cdcVouchers?: boolean;
 }
 
 export const EATBOOK_ARTICLES: readonly EatbookArticle[] = [
   { url: 'https://eatbook.sg/best-cafes-singapore/', title: 'Best Cafes In Singapore' },
   { url: 'https://eatbook.sg/quiet-cafes/', title: 'Quiet Cafes In Singapore', workFriendly: true },
+  { url: 'https://eatbook.sg/cafes-cdc-vouchers-singapore/', title: 'Cafes In Singapore That Accept CDC Vouchers', cdcVouchers: true },
 ];
 
 /** Generic client name; no personal details. */
@@ -132,6 +136,8 @@ export function parseEatbookArticle(html: string, article: EatbookArticle): { ti
       types: CAFE_TYPES.filter((t) => types.has(t)),
       charging: chargingFrom(body),
       halal: halalFrom(body),
+      cdcVouchers: article.cdcVouchers === true,
+      chain: false,
       website,
       sourceUrl: anchor ? `${article.url}#${anchor}` : article.url,
       sourceTitle: title,
@@ -141,18 +147,29 @@ export function parseEatbookArticle(html: string, article: EatbookArticle): { ti
   return { title, cafes };
 }
 
-/** Same café in two guides: keep the first listing, fill gaps from the second, union the types. */
+/**
+ * Same café in two guides (the same name at the same postcode, e.g. "No Horse Run" and "No Horse
+ * Run Cafe"): keep the first listing, fill gaps from the second, union the types. The same name at
+ * another postcode is another branch and stays its own entry, so its details (and whether it
+ * takes CDC Vouchers) stay with the right address.
+ */
 export function mergeCafes(lists: ScrapedCafe[][]): ScrapedCafe[] {
-  const byId = new Map<string, ScrapedCafe>();
+  const merged: ScrapedCafe[] = [];
+  const ids = new Set<string>();
   for (const cafe of lists.flat()) {
-    const existing = byId.get(cafe.id);
-    if (!existing) {
-      byId.set(cafe.id, cafe);
+    const index = merged.findIndex((m) =>
+      m.postalCode && cafe.postalCode ? m.postalCode === cafe.postalCode && sameBusiness(m.name, cafe.name) : m.id === cafe.id,
+    );
+    if (index === -1) {
+      const id = ids.has(cafe.id) ? `${cafe.id}-${cafe.postalCode ?? merged.length}` : cafe.id;
+      ids.add(id);
+      merged.push({ ...cafe, id });
       continue;
     }
+    const existing = merged[index]!;
     const types = new Set([...existing.types, ...cafe.types]);
     if (types.size > 1) types.delete('cafe');
-    byId.set(cafe.id, {
+    merged[index] = {
       ...existing,
       area: existing.area ?? cafe.area,
       hours: existing.hours ?? cafe.hours,
@@ -162,10 +179,11 @@ export function mergeCafes(lists: ScrapedCafe[][]): ScrapedCafe[] {
       types: CAFE_TYPES.filter((t) => types.has(t)),
       charging: existing.charging ?? cafe.charging,
       halal: existing.halal ?? cafe.halal,
+      cdcVouchers: existing.cdcVouchers || cafe.cdcVouchers,
       website: existing.website ?? cafe.website,
-    });
+    };
   }
-  return [...byId.values()];
+  return merged;
 }
 
 /**

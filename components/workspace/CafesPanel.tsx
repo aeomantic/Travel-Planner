@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { formatDistanceToNow } from 'date-fns';
 import {
@@ -15,6 +15,8 @@ import {
   Plus,
   RotateCcw,
   Search,
+  Store,
+  Ticket,
   X,
   Zap,
   ZapOff,
@@ -26,6 +28,7 @@ import {
   HALAL_LABEL,
   PRICE_TIERS,
   formatPriceRange,
+  sourceLabel,
   type Cafe,
   type CafeType,
   type CafesResponse,
@@ -40,6 +43,8 @@ import { cn } from '@/lib/utils';
 let loaded: CafesResponse | null = null;
 
 const FILTER_TYPES = CAFE_TYPES.filter((t) => t !== 'cafe');
+/** Cards rendered at a time: the CDC directory alone adds several hundred cafés. */
+const PAGE = 50;
 const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 function toggle<T>(set: ReadonlySet<T>, value: T): Set<T> {
@@ -54,6 +59,7 @@ function cafeNotes(cafe: Cafe): string {
     cafe.types.map((t) => CAFE_TYPE_LABELS[t]).join(', '),
     formatPriceRange(cafe),
     cafe.charging === true ? 'Charging ports' : null,
+    cafe.cdcVouchers ? 'Takes CDC vouchers' : null,
     cafe.hours,
   ]
     .filter(Boolean)
@@ -66,8 +72,9 @@ function fileSlug(title: string): string {
 }
 
 /**
- * Singapore cafés scraped from Eatbook (see app/api/cafes): filter by type, price and
- * charging ports, add any to Saved Places, or export the filtered list as CSV.
+ * Singapore cafés from OpenStreetMap, Eatbook guides and the CDC Vouchers directory (see
+ * app/api/cafes): filter by type, price, charging ports, CDC vouchers and chains, add any to
+ * Saved Places, or export the filtered list as CSV.
  */
 export function CafesPanel({ project, pins }: { project: Project; pins: ProjectPin[] }) {
   const canEdit = useTripStore(selectCanEdit);
@@ -84,6 +91,8 @@ export function CafesPanel({ project, pins }: { project: Project; pins: ProjectP
   const [types, setTypes] = useState<ReadonlySet<CafeType>>(() => new Set());
   const [tiers, setTiers] = useState<ReadonlySet<PriceTier>>(() => new Set());
   const [chargingOnly, setChargingOnly] = useState(false);
+  const [cdcOnly, setCdcOnly] = useState(false);
+  const [hideChains, setHideChains] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -117,12 +126,27 @@ export function CafesPanel({ project, pins }: { project: Project; pins: ProjectP
         (!q || [cafe.name, cafe.area, cafe.address].some((field) => field?.toLowerCase().includes(q))) &&
         (types.size === 0 || cafe.types.some((t) => types.has(t))) &&
         (tiers.size === 0 || (cafe.priceTier !== null && tiers.has(cafe.priceTier))) &&
-        (!chargingOnly || cafe.charging === true),
+        (!chargingOnly || cafe.charging === true) &&
+        (!cdcOnly || cafe.cdcVouchers) &&
+        (!hideChains || !cafe.chain),
     );
-  }, [cafes, query, types, tiers, chargingOnly]);
+  }, [cafes, query, types, tiers, chargingOnly, cdcOnly, hideChains]);
 
-  const filtering = query.trim() !== '' || types.size > 0 || tiers.size > 0 || chargingOnly;
+  const filtering = query.trim() !== '' || types.size > 0 || tiers.size > 0 || chargingOnly || cdcOnly || hideChains;
   const chargingCount = useMemo(() => cafes.filter((c) => c.charging === true).length, [cafes]);
+  const cdcCount = useMemo(() => cafes.filter((c) => c.cdcVouchers).length, [cafes]);
+  const chainCount = useMemo(() => cafes.filter((c) => c.chain).length, [cafes]);
+  const guideSources = useMemo(() => data?.sources.filter((s) => s.url.includes('eatbook.sg')) ?? [], [data]);
+  const osmSource = data?.sources.find((s) => s.url.includes('openstreetmap.org'));
+  const cdcSource = data?.sources.find((s) => s.url.includes('gowhere.gov.sg'));
+
+  // Render a page of cards at a time; new filters start again from the first page. A café
+  // focused from the map is always rendered, so its card can scroll into view.
+  const filterKey = [query.trim(), [...types].join(), [...tiers].join(), chargingOnly, cdcOnly, hideChains].join('|');
+  const [page, setPage] = useState({ key: filterKey, limit: PAGE });
+  const limit = page.key === filterKey ? page.limit : PAGE;
+  const focusedIndex = focusedCafeId ? filtered.findIndex((c) => c.id === focusedCafeId) : -1;
+  const shown = filtered.slice(0, Math.max(limit, focusedIndex + 1));
   const savedPin = useCallback((cafe: Cafe) => pins.find((p) => sameName(p.name, cafe.name)), [pins]);
 
   // The map shows what the list shows. Cafés already on the trip are left to the trip's own pins.
@@ -130,7 +154,7 @@ export function CafesPanel({ project, pins }: { project: Project; pins: ProjectP
     setCafeMarkers(
       filtered
         .filter((cafe): cafe is Cafe & { lat: number; lng: number } => cafe.lat !== null && cafe.lng !== null && !savedPin(cafe))
-        .map(({ id, name, lat, lng, priceTier, types: cafeTypes, charging }) => ({
+        .map(({ id, name, lat, lng, priceTier, types: cafeTypes, charging, cdcVouchers }) => ({
           id,
           name,
           lat,
@@ -138,6 +162,7 @@ export function CafesPanel({ project, pins }: { project: Project; pins: ProjectP
           priceTier,
           types: cafeTypes,
           charging,
+          cdcVouchers,
         })),
     );
   }, [filtered, savedPin, setCafeMarkers]);
@@ -217,15 +242,29 @@ export function CafesPanel({ project, pins }: { project: Project; pins: ProjectP
             </p>
             <p className="mt-0.5 text-xs text-zinc-400">
               {cafes.length} cafés from{' '}
-              <a
-                href="https://eatbook.sg/"
-                target="_blank"
-                rel="noreferrer"
-                title={data?.sources.map((s) => `${s.title} (${s.count})`).join('\n')}
-                className="text-zinc-300 underline-offset-2 hover:underline"
-              >
-                Eatbook guides
-              </a>
+              {joinSources(
+                [
+                  osmSource && (
+                    <SourceLink key="osm" href={osmSource.url} title={`${osmSource.title}: ${osmSource.count} cafés`}>
+                      OpenStreetMap
+                    </SourceLink>
+                  ),
+                  guideSources.length > 0 && (
+                    <SourceLink
+                      key="eatbook"
+                      href="https://eatbook.sg/"
+                      title={guideSources.map((s) => `${s.title} (${s.count})`).join('\n')}
+                    >
+                      Eatbook guides
+                    </SourceLink>
+                  ),
+                  cdcSource && (
+                    <SourceLink key="cdc" href={cdcSource.url} title={`${cdcSource.title}: ${cdcSource.count} more cafés`}>
+                      the CDC Vouchers directory
+                    </SourceLink>
+                  ),
+                ].filter((link): link is ReactElement => Boolean(link)),
+              )}
               {data?.scrapedAt && <> · updated {formatDistanceToNow(new Date(data.scrapedAt), { addSuffix: true })}</>}
               {data?.stale && <span className="text-amber-300"> · couldn’t refresh</span>}
             </p>
@@ -280,6 +319,23 @@ export function CafesPanel({ project, pins }: { project: Project; pins: ProjectP
             <Zap className="size-3" /> Charging ports
             <span className="text-[10px] opacity-70 tabular-nums">{chargingCount}</span>
           </Chip>
+          <Chip
+            active={cdcOnly}
+            onClick={() => setCdcOnly((v) => !v)}
+            tone="sky"
+            title="Listed in the official CDC Vouchers directory, or in a guide to cafés that take them"
+          >
+            <Ticket className="size-3" /> CDC vouchers
+            <span className="text-[10px] opacity-70 tabular-nums">{cdcCount}</span>
+          </Chip>
+          <Chip
+            active={hideChains}
+            onClick={() => setHideChains((v) => !v)}
+            title="Hide Starbucks, Toast Box, Ya Kun and other cafés with four or more outlets"
+          >
+            <Store className="size-3" /> Hide chains
+            <span className="text-[10px] opacity-70 tabular-nums">{chainCount}</span>
+          </Chip>
         </div>
       </section>
 
@@ -295,6 +351,8 @@ export function CafesPanel({ project, pins }: { project: Project; pins: ProjectP
               setTypes(new Set());
               setTiers(new Set());
               setChargingOnly(false);
+              setCdcOnly(false);
+              setHideChains(false);
             }}
             className="font-medium text-indigo-300 hover:text-indigo-200"
           >
@@ -309,7 +367,7 @@ export function CafesPanel({ project, pins }: { project: Project; pins: ProjectP
         </p>
       ) : (
         <ul className="space-y-2">
-          {filtered.map((cafe, i) => (
+          {shown.map((cafe, i) => (
             <CafeCard
               key={cafe.id}
               cafe={cafe}
@@ -325,13 +383,49 @@ export function CafesPanel({ project, pins }: { project: Project; pins: ProjectP
         </ul>
       )}
 
+      {shown.length < filtered.length && (
+        <button
+          type="button"
+          onClick={() => setPage({ key: filterKey, limit: shown.length + PAGE })}
+          className="w-full rounded-xl border border-zinc-700/60 bg-zinc-800/40 py-2 text-xs font-medium text-zinc-300 transition-colors hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100"
+        >
+          Show {Math.min(PAGE, filtered.length - shown.length)} more
+          <span className="ml-1 text-zinc-500 tabular-nums">({filtered.length - shown.length} left)</span>
+        </button>
+      )}
+
       <p className="px-1 pt-1 text-[11px] leading-relaxed text-zinc-600">
-        Click a café to find it on the map; the amber cups are the cafés listed here. Prices are dish prices quoted in the
-        guides; the $ tier comes from a typical dish. Charging ports are shown only where a
-        guide mentions them. Details can change, so check the café before you go.
+        Click a café to find it on the map; the amber dots are the cafés listed here. Prices are dish prices quoted in the
+        guides; the $ tier comes from a typical dish. Charging ports are shown only where a guide mentions them. CDC
+        vouchers means the official CDC Vouchers directory lists the café at that address (or a guide says it takes
+        them). Cafés found only in OpenStreetMap or the directory have no prices, and hours only where mappers added
+        them. Details can change, so check the café, and look for the CDC decal, before you go.
+        {osmSource && (
+          <>
+            {' '}
+            Café data ©{' '}
+            <a href={osmSource.url} target="_blank" rel="noreferrer" className="underline-offset-2 hover:underline">
+              OpenStreetMap contributors
+            </a>
+            , ODbL.
+          </>
+        )}
       </p>
     </div>
   );
+}
+
+function SourceLink({ href, title, children }: { href: string; title: string; children: ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noreferrer" title={title} className="text-zinc-300 underline-offset-2 hover:underline">
+      {children}
+    </a>
+  );
+}
+
+/** "A", "A and B", "A, B and C". */
+function joinSources(links: ReactElement[]): ReactNode[] {
+  return links.flatMap((link, i) => (i === 0 ? [link] : [i === links.length - 1 ? ' and ' : ', ', link]));
 }
 
 const TIER_HINT: Record<PriceTier, string> = {
@@ -425,6 +519,14 @@ function CafeCard({
             <ZapOff className="size-3" /> No charging
           </span>
         )}
+        {cafe.cdcVouchers && (
+          <span
+            className="inline-flex items-center gap-0.5 rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[10.5px] font-medium text-sky-300"
+            title="Takes CDC Vouchers"
+          >
+            <Ticket className="size-3" /> CDC vouchers
+          </span>
+        )}
         {(cafe.halal === 'certified' || cafe.halal === 'no-pork-lard') && (
           <span className="rounded-md bg-teal-500/10 px-1.5 py-0.5 text-[10.5px] font-medium text-teal-300">
             {HALAL_LABEL[cafe.halal]}
@@ -432,9 +534,11 @@ function CafeCard({
         )}
       </div>
 
-      <p className="mt-2 truncate text-xs text-zinc-500" title={cafe.address}>
-        {cafe.address}
-      </p>
+      {cafe.address && (
+        <p className="mt-2 truncate text-xs text-zinc-500" title={cafe.address}>
+          {cafe.address}
+        </p>
+      )}
       {cafe.hours && (
         <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-zinc-500" title={cafe.hours}>
           <Clock className="size-3 shrink-0" />
@@ -475,9 +579,9 @@ function CafeCard({
           rel="noreferrer"
           onClick={(e) => e.stopPropagation()}
           className="ml-auto inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-zinc-400 transition-colors hover:bg-zinc-700/60 hover:text-zinc-100"
-          title={`Read about ${cafe.name} on Eatbook`}
+          title={`${cafe.name} on ${cafe.sourceTitle}`}
         >
-          Eatbook <ExternalLink className="size-3" />
+          {sourceLabel(cafe.sourceUrl)} <ExternalLink className="size-3" />
         </a>
       </div>
     </motion.li>
@@ -493,7 +597,7 @@ function Chip({
 }: {
   active: boolean;
   onClick: () => void;
-  tone?: 'indigo' | 'amber';
+  tone?: 'indigo' | 'amber' | 'sky';
   title?: string;
   children: ReactNode;
 }) {
@@ -508,7 +612,9 @@ function Chip({
         active
           ? tone === 'amber'
             ? 'border-amber-500/50 bg-amber-500/15 text-amber-100'
-            : 'border-indigo-500/50 bg-indigo-500/15 text-indigo-100'
+            : tone === 'sky'
+              ? 'border-sky-500/50 bg-sky-500/15 text-sky-100'
+              : 'border-indigo-500/50 bg-indigo-500/15 text-indigo-100'
           : 'border-zinc-700/70 bg-zinc-900/40 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200',
       )}
     >
